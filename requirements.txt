@@ -1,0 +1,8 @@
+uvicorn
+fastapi
+ollama
+pymongo
+pydantic
+numpy
+sentence_transformers
+scikit-learn[preprocessing]

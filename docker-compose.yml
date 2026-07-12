@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  llm_service:
+    build:
+      context: ./LLMService  # Path to your llm_service directory
+      dockerfile: Dockerfile
+    container_name: llm-service
+    ports:
+      - "8000:8000"
+    # No need for OLLAMA_HOST env var since you're hardcoding it
+    # But you can make it configurable:
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      # This is the key - allows container to access host's Ollama
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  session:
+    build:
+      context: ./Session
+      dockerfile: Dockerfile
+    container_name: session-service
+    ports:
+      - "8001:8000"
+    environment:
+      - LLM_SERVICE_URL=http://llm_service:8000
+#    depends_on:
+#      llm_service:
+#        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge

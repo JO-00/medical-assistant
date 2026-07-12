@@ -1,0 +1,8 @@
+pydantic
+fastapi
+uvicorn
+requests
+pycld2
+scikit-learn[metrics]
+numpy
+sentence_transformers
