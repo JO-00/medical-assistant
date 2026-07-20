@@ -1,5 +1,7 @@
 from Router.Embeddings.compare import infer
-
+import logging
+from datetime import datetime
+logger = logging.getLogger()
 
 
 
@@ -49,13 +51,15 @@ def get_contexts() -> dict:
 
 CONTEXTS = get_contexts()
 
-def inject_dynamic_context(prompt: str, detected_language: str) -> str:
+def inject_dynamic_context(prompt: str, doctor_id : int , detected_language: str) -> str:
     print("inject_dynamic_content called")
     domain = infer(prompt)
+    logger.critical(f"domain = {domain}")
+
     
     # If database, return the string directly
     if domain == "database":
-        return CONTEXTS["database"] , "database"
+        return CONTEXTS["database"].replace("[today]", datetime.now().strftime("%Y-%m-%d")).replace("[id_medecin]", str(doctor_id)), "database"
     
     # For conversational and time_detection, use language
     if detected_language and detected_language != "en":

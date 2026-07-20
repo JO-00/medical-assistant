@@ -106,7 +106,7 @@ def contains_temporal_intent(prompt: str) -> bool:
         "today", "tomorrow", "yesterday", "next", "last",
         "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
         "january", "february", "march", "april", "may", "june", "july", "august", 
-        "september", "october", "november", "december",
+        "september", "october", "november", "december"
         "hour", "hours", "minute", "minutes", "o'clock", "am", "pm", 
         "morning", "afternoon", "evening", "night",
         "date", "time", "week", "month", "year", "day",
@@ -176,8 +176,6 @@ def extract_time(input: str, language: str):
         # ANCHOR FIX: If it's still a string due to double serialization, strip the inner layer
         if isinstance(extracted_json, str):
             extracted_json = json.loads(extracted_json)
-            
-        print(f"DEBUG: extracted_json = {extracted_json} (Type: {type(extracted_json)})")
     except Exception as e:
         print(f"Error parsing LLM payload: {e}")
         return "XXXX-XX-XX XX:XX", {
@@ -218,15 +216,19 @@ def insert_time(prompt : str , language : str = "en") -> str:
     extracted_time , extracted_json = extract_time(prompt , language)
     if extracted_time == "XXXX-XX-XX XX:XX" : 
         return prompt
-    if extracted_json['time_string_literal'] in prompt :
-        prompt  = prompt.replace(extracted_json['time_string_literal'] , extracted_time) 
-    else:
-        prompt = prompt + f"<indication> the time  implied is {extracted_time}"
+    substr = extracted_json["time_string_literal"]
+
+    if not substr or substr not in prompt :
+        return prompt + f" <indication> the time  implied is {extracted_time} </indication>"
+    
+    prompt  = prompt.replace(extracted_json['time_string_literal'] , extracted_time) 
+    
     return prompt
 
 
 
-
+#for debugging purposes only
 if __name__ == "__main__" :
+    from mock_ollama_call import call_ollama
     while 1:
         print(insert_time(input("INPUT = ") ,input("Enter your language = ")))

@@ -6,3 +6,4 @@ pycld2
 scikit-learn[metrics]
 numpy
 sentence_transformers
+redis
