@@ -1,0 +1,13 @@
+fastrtc
+pydantic
+requests
+uvicorn
+fastapi
+transformers
+faster_whisper
+numpy
+librosa
+httpx
+PyJWT
+asyncpg
+bcrypt

@@ -23,13 +23,17 @@ def get_session(input_data: dict) -> ConversationHistory:
    
 
 def handle_input(input_data: dict) -> ConversationHistory:
-    
+    import logging
+    logger = logging.getLogger()
+    logger.debug(f"handle_input received {input_data}")
     if 'doctor_id' not in input_data or 'message' not in input_data:
         raise ValueError("Missing fields")
     
+    logger.debug(f"doctor_id = {input_data['doctor_id']}")
+    
     doctor_id = input_data["doctor_id"]
     session_id = input_data.get("session_id")
-    message = input_data["message"]
+    message = input_data["message"].replace("-","") # in case the user is spelling over the mic a certain name because pronunciation might be inaccurate!
     
     if session_id:
         session = manager.load_session_context(doctor_id, session_id)

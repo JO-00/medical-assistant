@@ -1,23 +1,21 @@
 version: '3.8'
 
 services:
-  llm_service:
+  llm-service: # Changed from llm_service to avoid DNS resolution quirks
     build:
-      context: ./LLMService  # Path to your llm_service directory
+      context: ./LLMService
       dockerfile: Dockerfile
     container_name: llm-service
     ports:
       - "8000:8000"
-    # No need for OLLAMA_HOST env var since you're hardcoding it
-    # But you can make it configurable:
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
+      - DB_DSN=postgresql://postgres:password@postgres:5432/medical
     extra_hosts:
-      # This is the key - allows container to access host's Ollama
       - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
@@ -33,14 +31,92 @@ services:
     ports:
       - "8001:8000"
     environment:
-      - LLM_SERVICE_URL=http://llm_service:8000
-#    depends_on:
-#      llm_service:
-#        condition: service_healthy
+      - LLM_SERVICE_URL=http://llm-service:8000 
+      - HF_TOKEN=${HF_TOKEN}
     networks:
       - app-network
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: medical
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql_scripts:/docker-entrypoint-initdb.d/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d medical || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - app-network
+
+  voice_gateway:
+    build:
+      context: ./VoiceGateway
+      dockerfile: Dockerfile
+    container_name: voice-gateway
+    ports:
+      - "8002:8000"
+      - "50000-50010:50000-50010/udp" # 🟢 Exposes WebRTC media channels out to Windows
+    environment:
+      - SESSION_SERVICE_URL=http://session:8000 # 🟢 Target the container service key directly on its internal port
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_HOME=/root/.cache/huggingface
+      - LLM_SERVICE_URL=http://llm-service:8000
+      - DB_DSN=postgresql://postgres:password@postgres:5432/medical 
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-me}  
+      - ALGORITHM=HS256 
+    #depends_on:
+    #  - postgres
+    #  - redis
+    volumes:
+      - ${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  react_ui:
+    build:
+      context: ./doctor-voice-ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:8002 # Correct: your browser treats 'localhost' as your Windows machine
+        - VITE_RTC_BASE_URL=http://localhost:8002
+        - VITE_WEBRTC_OFFER_PATH=/webrtc/offer
+    container_name: react-ui
+    ports:
+      - "3000:80"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks: 
+      - app-network  
+    container_name: redis
+
+  
+
+
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  postgres_data:

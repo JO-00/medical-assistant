@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional , List
 from datetime import datetime
 from ollama_api import call_ollama
+from llm_db.main import router, handle_database_request
 
 class ConversationHistory(BaseModel):
     doctor_id: int
@@ -16,6 +17,7 @@ class ConversationHistory(BaseModel):
 
 
 app = FastAPI()
+app.include_router(router)
 
 
 def build_context(session: ConversationHistory) -> str:
@@ -37,16 +39,20 @@ def build_context(session: ConversationHistory) -> str:
 
 @app.post("/llm_service")
 def respond(session: ConversationHistory) -> ConversationHistory:
-    context = build_context(session)
-    print(context)
-    response = call_ollama(user_message=context, system_prompt="")
-    
-    # Add the assistant's response to the session content
-    session.content.append(('Assistant', response))
+
+    if session.intent == "database":
+        response = handle_database_request(session)
+
+    else:
+        context = build_context(session)
+        response = call_ollama(
+            user_message=context,
+            system_prompt=""
+        )
+
+    session.content.append(("Assistant", response))
     session.last_response = response
-    import logging
-    logger = logging.getLogger()
-    logger.critical(f"POV llm service : {session}")
+
     return session
 
 

@@ -54,10 +54,5 @@ def infer(prompt : str) -> str:
 
 
 
-if __name__ == "__main__":
-    while True:
-        result = infer(input("Enter = "))
-        print(result) 
-
 
 
