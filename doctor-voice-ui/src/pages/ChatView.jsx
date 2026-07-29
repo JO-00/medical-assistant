@@ -1,9 +1,18 @@
 import { useParams, useOutletContext } from "react-router-dom";
-import { Globe2, Clock, Send, Loader2 } from "lucide-react";
+import { Globe2, Clock, Send, Loader2, Database, X, Check, Zap } from "lucide-react";
 import ChatBubbles from "../components/ChatBubbles";
-import { useState } from "react";
-import { sendMessage } from "../lib/api";
+import { useState, useRef, useEffect } from "react";
+import { sendMessage, setDatabaseDomain, toggleDatabaseMode } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { DOMAIN_ICONS } from "../lib/icons";
+
+const DOMAINS = [
+  { id: "autodetect", label: "Autodetect", icon: DOMAIN_ICONS.autodetect, note: "not recommended" },
+  { id: "patients", label: "Patients", icon: DOMAIN_ICONS.patients },
+  { id: "appointments", label: "Appointments", icon: DOMAIN_ICONS.appointments },
+  { id: "doctor_notes", label: "Doctor Notes", icon: DOMAIN_ICONS.doctor_notes },
+  { id: "acte_medecin", label: "Medical Acts", icon: DOMAIN_ICONS.acte_medecin },
+];
 
 export default function ChatView() {
   const { id } = useParams();
@@ -13,6 +22,20 @@ export default function ChatView() {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState([]);
+  const [dbModeActive, setDbModeActive] = useState(false);
+  const [dbMenuOpen, setDbMenuOpen] = useState(false);
+  const [selectedDomain, setSelectedDomain] = useState("autodetect");
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setDbMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleSendMessage = async () => {
     if (!message.trim() || sending || !user) return;
@@ -21,7 +44,6 @@ export default function ChatView() {
     setMessage("");
     setSending(true);
     
-    // Add user message immediately (optimistic update)
     setOptimisticMessages(prev => [...prev, {
       role: "USER",
       text: userMessage,
@@ -30,16 +52,10 @@ export default function ChatView() {
     
     try {
       await sendMessage(user.id, parseInt(id), userMessage);
-      
-      // Refresh to get the assistant's response
       await refreshSessions();
-      
-      // Clear optimistic messages since we got the real data
       setOptimisticMessages([]);
-      
     } catch (error) {
       console.error("Failed to send message:", error);
-      // Remove the optimistic message on error
       setOptimisticMessages(prev => prev.filter(msg => !msg.isOptimistic));
     } finally {
       setSending(false);
@@ -53,6 +69,36 @@ export default function ChatView() {
     }
   };
 
+  const handleToggleDatabase = async () => {
+    const newState = !dbModeActive;
+    
+    try {
+      // Appel API pour activer/désactiver le mode DB
+      await toggleDatabaseMode(parseInt(id), newState);
+      
+      setDbModeActive(newState);
+      setDbMenuOpen(newState);
+      
+      if (!newState) {
+        setSelectedDomain("autodetect");
+      }
+    } catch (error) {
+      console.error("Failed to toggle database mode:", error);
+    }
+  };
+
+  const handleSelectDomain = async (domainId) => {
+    setSelectedDomain(domainId);
+    setDbMenuOpen(false);
+    
+    try {
+      await setDatabaseDomain(parseInt(id), domainId);
+      console.log(`Domain set to: ${domainId}`);
+    } catch (error) {
+      console.error("Failed to set domain:", error);
+    }
+  };
+
   if (!session) {
     return (
       <div className="h-full flex items-center justify-center text-ink-faint text-sm">
@@ -61,7 +107,6 @@ export default function ChatView() {
     );
   }
 
-  // Combine real messages with optimistic ones
   const allMessages = [
     ...session.content.map(msg => ({
       role: msg.role,
@@ -70,7 +115,6 @@ export default function ChatView() {
     ...optimisticMessages
   ];
 
-  // Add loading dots if sending (assistant is thinking)
   if (sending) {
     allMessages.push({
       role: "ASSISTANT",
@@ -78,6 +122,8 @@ export default function ChatView() {
       isLoading: true
     });
   }
+
+  const selectedDomainData = DOMAINS.find(d => d.id === selectedDomain);
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8 flex flex-col h-full">
@@ -95,6 +141,12 @@ export default function ChatView() {
                 {session.detectedLanguage}
               </span>
             )}
+            {dbModeActive && selectedDomainData && (
+              <span className="inline-flex items-center gap-1 text-sage text-xs font-medium">
+                <Database size={12} />
+                DB: {selectedDomainData.label}
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -103,9 +155,55 @@ export default function ChatView() {
         <ChatBubbles content={allMessages} />
       </div>
 
-      {/* Message Input */}
       <div className="shrink-0 border-t border-line pt-4">
         <div className="flex gap-2">
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={handleToggleDatabase}
+              className={`rounded-lg border px-3 py-2.5 transition-colors ${
+                dbModeActive 
+                  ? "bg-sage/10 border-sage text-sage" 
+                  : "border-line text-ink-faint hover:border-ink/30 hover:text-ink"
+              }`}
+              title="Toggle database mode"
+            >
+              <Database size={18} />
+            </button>
+
+            {dbMenuOpen && (
+              <div className="absolute bottom-full mb-2 left-0 bg-paper-raised rounded-xl shadow-xl border border-line p-2 min-w-[220px] z-50">
+                <div className="text-xs text-ink-faint px-3 py-1 border-b border-line mb-1">
+                  Select database domain
+                </div>
+                {DOMAINS.map((domain) => (
+                  <button
+                    key={domain.id}
+                    onClick={() => handleSelectDomain(domain.id)}
+                    className={`
+                      w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                      flex items-center gap-3
+                      ${selectedDomain === domain.id 
+                        ? "bg-sage/10 text-ink" 
+                        : "hover:bg-paper-raised-hover text-ink"
+                      }
+                    `}
+                  >
+                    <span className="text-base">{domain.icon}</span>
+                    <span className="flex-1">{domain.label}</span>
+                    {domain.note && (
+                      <span className="text-[10px] text-ink-faint/60 bg-amber-50 px-1.5 py-0.5 rounded">
+                        {domain.note}
+                      </span>
+                    )}
+                    {selectedDomain === domain.id && (
+                      <Check size={14} className="text-sage" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <input
             type="text"
             value={message}

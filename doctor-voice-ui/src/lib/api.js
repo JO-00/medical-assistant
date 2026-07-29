@@ -102,3 +102,20 @@ export async function sendMessage(doctorId, sessionId, message) {
   return data;
 }
 
+// ---- Database Service ----------------------------------------------------
+
+export async function setDatabaseDomain(sessionId, domain) {
+  const { data } = await api.post("/set_database_domain", {
+    session_id: sessionId,
+    domain: domain
+  });
+  return data;
+}
+
+export async function toggleDatabaseMode(sessionId, enabled) {
+  const { data } = await api.post("/toggle_database", {
+    session_id: sessionId,
+    enabled: enabled
+  });
+  return data;
+}

@@ -1,4 +1,4 @@
-import redis, json
+import redis, json, os
 from datetime import date, datetime
 
 def convert_dates(obj):
@@ -44,6 +44,7 @@ class DatabaseSession:
             f"id_session={self.id_session}, "
             f"status={self.status}, "
             f"query_type={self.query_type})"
+            f"clarification_history={self.clarification_history}"
         )
     
     def to_dict(self):
@@ -81,38 +82,42 @@ class DatabaseSession:
 
 class SessionManager:
 
-    def __init__(self):
-        self.redis = redis.Redis(
-            host="redis",
-            port=6379,
-            decode_responses=True
-        )
+    redis = redis.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=6379,
+        decode_responses=True
+    )
 
-    def create_session(self, id_medecin, id_session):
+    @staticmethod
+    def create_session(id_medecin, id_session) -> DatabaseSession :
         session = DatabaseSession(id_medecin, id_session)
         key = f"db:{id_medecin}:{id_session}"
-        self.redis.set(key, json.dumps(session.to_dict()))
+        SessionManager.redis.set(key, json.dumps(session.to_dict()))
         return session
 
-    def get_session(self, id_medecin, id_session):
+    @staticmethod
+    def get_session(id_medecin, id_session) -> DatabaseSession :
         key = f"db:{id_medecin}:{id_session}"
-        data = self.redis.get(key)
+        data = SessionManager.redis.get(key)
         if data is None:
-            return self.create_session(id_medecin, id_session)
+            return SessionManager.create_session(id_medecin, id_session)
         return DatabaseSession.from_dict(json.loads(data))
 
-    def save_session(self, session):
+    @staticmethod
+    def save_session(session : DatabaseSession):
         key = f"db:{session.id_medecin}:{session.id_session}"
-        self.redis.set(key, json.dumps(session.to_dict()))
+        SessionManager.redis.set(key, json.dumps(session.to_dict()))
 
-    def delete_session(self, id_medecin, id_session):
+    @staticmethod
+    def delete_session(id_medecin : int , id_session : int):
         key = f"db:{id_medecin}:{id_session}"
-        return self.redis.delete(key) > 0
+        return SessionManager.redis.delete(key) > 0
 
-    def get_all_doctor_sessions(self, id_medecin):
+    @staticmethod
+    def get_all_doctor_sessions(id_medecin) -> list[DatabaseSession]:
         sessions = []
-        for key in self.redis.scan_iter(f"db:{id_medecin}:*"):
-            data = self.redis.get(key)
+        for key in SessionManager.redis.scan_iter(f"db:{id_medecin}:*"):
+            data = SessionManager.redis.get(key)
             if data is not None:
                 sessions.append(DatabaseSession.from_dict(json.loads(data)))
         return sessions

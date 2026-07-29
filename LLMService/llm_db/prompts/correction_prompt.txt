@@ -1,0 +1,7 @@
+ERREUR: La requête générée ne contient pas "id_medecin = [id_medecin]"
+Générez UNIQUEMENT la requête SQL CORRECTE avec "id_medecin = [id_medecin]" inclus.
+N'utilisez PAS de markdown. N'expliquez PAS.
+
+Utilisateur (medecin_id = [id_medecin]): [user_query]
+
+SQL: """

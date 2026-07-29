@@ -48,116 +48,113 @@ export default function VoiceCall() {
   useEffect(() => () => cleanup(), [cleanup]);
 
   const startCall = async () => {
-  setError("");
-  setStatus("connecting");
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    localStreamRef.current = stream;
+    setError("");
+    setStatus("connecting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    pcRef.current = pc;
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      pcRef.current = pc;
 
-    const dataChannel = pc.createDataChannel("text");
-    dataChannelRef.current = dataChannel;
+      const dataChannel = pc.createDataChannel("text");
+      dataChannelRef.current = dataChannel;
 
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-    pc.ontrack = (event) => {
-      console.log("TRACK", event.track.kind, event.track.readyState);
+      pc.ontrack = (event) => {
+        console.log("TRACK", event.track.kind, event.track.readyState);
 
-      event.track.onended = () => {
-        console.log("REMOTE TRACK ENDED");
+        event.track.onended = () => {
+          console.log("REMOTE TRACK ENDED");
+        };
+
+        event.track.onmute = () => {
+          console.log("REMOTE TRACK MUTED");
+        };
+
+        event.track.onunmute = () => {
+          console.log("REMOTE TRACK UNMUTED");
+        };
+
+        if (!remoteAudioRef.current) {
+          console.log("No audio element!");
+          return;
+        }
+
+        let remoteStream;
+
+        if (event.streams && event.streams[0]) {
+          remoteStream = event.streams[0];
+        } else {
+          remoteStream = new MediaStream([event.track]);
+        }
+
+        console.log("REMOTE STREAM", remoteStream);
+
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.volume = 1.0;
+
+        remoteAudioRef.current.play()
+          .then(() => console.log("AUDIO PLAYING"))
+          .catch((err) => {
+            console.error("AUDIO PLAY FAILED:", err);
+            setError("Audio blocked. Click anywhere to enable playback.");
+          });
       };
 
-      event.track.onmute = () => {
-        console.log("REMOTE TRACK MUTED");
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE state:", pc.iceConnectionState);
+      };
+      
+      pc.onsignalingstatechange = () => {
+        console.log("SIGNAL state:", pc.signalingState);
       };
 
-      event.track.onunmute = () => {
-        console.log("REMOTE TRACK UNMUTED");
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          console.log("ICE candidate:", e.candidate);
+        }
       };
 
-      if (!remoteAudioRef.current) {
-        console.log("No audio element!");
-        return;
-      }
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitForIceGathering(pc);
 
-      let remoteStream;
+      const webrtcId = crypto.randomUUID();
+      const res = await fetch(`${RTC_BASE_URL}${WEBRTC_OFFER_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type,
+          webrtc_id: webrtcId,
+        }),
+      });
 
-      if (event.streams && event.streams[0]) {
-        remoteStream = event.streams[0];
-      } else {
-        remoteStream = new MediaStream([event.track]);
-      }
+      if (!res.ok) throw new Error(`Signaling failed (${res.status})`);
+      
+      const answer = await res.json();
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
-      console.log("REMOTE STREAM", remoteStream);
+      setStatus("connected");
+      startedAtRef.current = Date.now();
+      timerRef.current = setInterval(() => {
+        setDuration(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      }, 1000);
 
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.volume = 1.0;
-
-      remoteAudioRef.current.play()
-        .then(() => console.log("AUDIO PLAYING"))
-        .catch((err) => {
-          console.error("AUDIO PLAY FAILED:", err);
-          setError("Audio blocked. Click anywhere to enable playback.");
-        });
-    };
-
-    
-    
-    pc.oniceconnectionstatechange = () => {
-      console.log("ICE state:", pc.iceConnectionState);
-    };
-    
-    pc.onsignalingstatechange = () => {
-      console.log("SIGNAL state:", pc.signalingState);
-    };
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        console.log("ICE candidate:", e.candidate);
-      }
-    };
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await waitForIceGathering(pc);
-
-    const webrtcId = crypto.randomUUID();
-    const res = await fetch(`${RTC_BASE_URL}${WEBRTC_OFFER_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sdp: pc.localDescription.sdp,
-        type: pc.localDescription.type,
-        webrtc_id: webrtcId,
-      }),
-    });
-
-    if (!res.ok) throw new Error(`Signaling failed (${res.status})`);
-    
-    const answer = await res.json();
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-
-    setStatus("connected");
-    startedAtRef.current = Date.now();
-    timerRef.current = setInterval(() => {
-      setDuration(Math.floor((Date.now() - startedAtRef.current) / 1000));
-    }, 1000);
-
-  } catch (err) {  // ← THIS must be OUTSIDE the try block
-    setError(
-      err.name === "NotAllowedError"
-        ? "Microphone access blocked. Please allow permissions."
-        : "Couldn't reach the assistant. Check your backend status."
-    );
-    setStatus("idle");
-    cleanup();
-  }
-};
-  
+    } catch (err) {
+      setError(
+        err.name === "NotAllowedError"
+          ? "Microphone access blocked. Please allow permissions."
+          : "Couldn't reach the assistant. Check your backend status."
+      );
+      setStatus("idle");
+      cleanup();
+    }
+  };
 
   const endCall = () => {
     cleanup();
@@ -167,16 +164,14 @@ export default function VoiceCall() {
   };
 
   const toggleMute = () => {
-      const track = localStreamRef.current?.getAudioTracks()[0];
-      if (track) {
-        setMuted((prev) => {
-          // If currently muted (true), enable the track (false)
-          // If currently not muted (false), disable the track (true)
-          track.enabled = prev;  // When prev=true (muted), track.enabled=false (disabled)
-          return !prev;
-        });
-      }
-    };
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (track) {
+      setMuted((prev) => {
+        track.enabled = prev;
+        return !prev;
+      });
+    }
+  };
 
   return (
     <div className="h-full flex flex-col items-center justify-center px-6">
@@ -266,7 +261,6 @@ function waitForIceGathering(pc) {
   
   return new Promise((resolve) => {
     const check = () => {
-      // 🟢 Fix: Only resolve when gathering is fully complete
       if (pc.iceGatheringState === "complete") {
         pc.removeEventListener("icegatheringstatechange", check);
         resolve();
@@ -275,8 +269,6 @@ function waitForIceGathering(pc) {
     
     pc.addEventListener("icegatheringstatechange", check);
     
-    // Safety timeout: If it takes too long to find every public port, 
-    // proceed after 1 second with what we have
     setTimeout(() => {
       pc.removeEventListener("icegatheringstatechange", check);
       resolve();

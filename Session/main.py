@@ -2,9 +2,11 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from session_management import handle_input , manager
 from ContextManager import ConversationHistory
-from session_management import ConversationHistories
 from typing import Optional
 import redis,json
+from fastapi import Depends, HTTPException
+import redis
+
 
 app = FastAPI()
 
@@ -64,5 +66,54 @@ def get_conversations(
     return conversations
 
 
+
+class SetDatabaseDomainRequest(BaseModel):
+    session_id: int
+    doctor_id : int
+    domain: str
+
+class ToggleDatabaseRequest(BaseModel):
+    doctor_id : int
+    session_id: int
+    enabled: bool
+
+r = redis.Redis(
+            host="redis",
+            port=6379,
+            decode_responses=True
+        )
+
+
+@app.post("/toggle_database")
+def toggle_database(request: ToggleDatabaseRequest):
+    doctor_id = request.doctor_id
+    
+    session = manager.load_session_context(doctor_id, request.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.database_mode_enabled = request.enabled
+    manager.save_session(session)
+    
+    # Delete DatabaseSession from Redis if disabling
+    if not request.enabled:
+        key = f"db:{doctor_id}:{request.session_id}"
+        r.delete(key)
+    
+    return {"status": "ok", "enabled": request.enabled}
+
+
+@app.post("/set_database_domain")
+def set_database_domain(request: SetDatabaseDomainRequest):
+    doctor_id = request.doctor_id
+    
+    session = manager.load_session_context(doctor_id, request.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.domain = request.domain
+    manager.save_session(session)
+    
+    return {"status": "ok", "domain": request.domain}
 
 

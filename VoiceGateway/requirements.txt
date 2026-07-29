@@ -11,3 +11,4 @@ httpx
 PyJWT
 asyncpg
 bcrypt
+python-dotenv

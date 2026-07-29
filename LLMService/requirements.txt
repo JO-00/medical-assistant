@@ -6,3 +6,5 @@ requests
 redis
 requests>=2.31
 psycopg2-binary>=2.9
+sqlglot
+python-dotenv

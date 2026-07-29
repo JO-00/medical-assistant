@@ -1,16 +1,17 @@
 version: '3.8'
 
 services:
-  llm-service: # Changed from llm_service to avoid DNS resolution quirks
+  llm-service:
     build:
       context: ./LLMService
       dockerfile: Dockerfile
     container_name: llm-service
     ports:
       - "8000:8000"
+    env_file:
+      - ./LLMService/.env
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
-      - DB_DSN=postgresql://postgres:password@postgres:5432/medical
+      - REDIS_HOST=redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -31,8 +32,7 @@ services:
     ports:
       - "8001:8000"
     environment:
-      - LLM_SERVICE_URL=http://llm-service:8000 
-      - HF_TOKEN=${HF_TOKEN}
+      - LLM_SERVICE_URL=http://llm-service:8000
     networks:
       - app-network
     restart: unless-stopped
@@ -41,16 +41,16 @@ services:
     image: postgres:16-alpine
     container_name: postgres_container
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: medical
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: mydb
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql_scripts:/docker-entrypoint-initdb.d/
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d medical || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d mydb || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -62,20 +62,18 @@ services:
       context: ./VoiceGateway
       dockerfile: Dockerfile
     container_name: voice-gateway
+    env_file:
+      - ./VoiceGateway/.env
     ports:
       - "8002:8000"
       - "50000-50010:50000-50010/udp" # 🟢 Exposes WebRTC media channels out to Windows
     environment:
       - SESSION_SERVICE_URL=http://session:8000 # 🟢 Target the container service key directly on its internal port
-      - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/root/.cache/huggingface
       - LLM_SERVICE_URL=http://llm-service:8000
-      - DB_DSN=postgresql://postgres:password@postgres:5432/medical 
-      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-me}  
-      - ALGORITHM=HS256 
-    #depends_on:
-    #  - postgres
-    #  - redis
+    depends_on:
+      - postgres
+      - redis
     volumes:
       - ${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface
     networks:
@@ -93,7 +91,7 @@ services:
       context: ./doctor-voice-ui
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://localhost:8002 # Correct: your browser treats 'localhost' as your Windows machine
+        - VITE_API_BASE_URL=http://localhost:8002 # we gotta go for localhost because a container cannot run a browser inside it !!
         - VITE_RTC_BASE_URL=http://localhost:8002
         - VITE_WEBRTC_OFFER_PATH=/webrtc/offer
     container_name: react-ui
@@ -110,6 +108,8 @@ services:
     networks: 
       - app-network  
     container_name: redis
+    volumes:
+      - redis-data:/data
 
   
 
@@ -120,3 +120,4 @@ networks:
 
 volumes:
   postgres_data:
+  redis-data:

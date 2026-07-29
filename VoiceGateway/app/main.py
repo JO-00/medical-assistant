@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Depends, Request,HTTPException
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from auth import router as auth_router, get_current_user
 import logging,requests
 from context import current_doctor_id
 logger = logging.getLogger(__name__)
 import os
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -52,13 +52,21 @@ def get_conversations(current_user: dict = Depends(get_current_user)):
     return response.json()
 
 
+class SetDatabaseDomainRequest(BaseModel):
+    session_id: int
+    domain: str
 
-
+class ToggleDatabaseRequest(BaseModel):
+    session_id: int
+    enabled: bool
 
 class TextRequest(BaseModel):
     doctor_id: int
     session_id: int
     message: str
+
+
+
 
 @app.post("/text_session")
 def text_session(
@@ -82,6 +90,43 @@ def text_session(
     return response.json()
 
 
+
+
+@app.post("/set_database_domain")
+def set_database_domain(
+    request: SetDatabaseDomainRequest,
+    current_user: dict = Depends(get_current_user)
+    ):
+    doctor_id = current_user["id"]
+    
+    response = requests.post(
+        os.getenv("SESSION_SERVICE_URL") + "/set_database_domain",
+        json={
+            "doctor_id": doctor_id,
+            "session_id": request.session_id,
+            "domain": request.domain
+        }
+    )
+    return response.json()
+
+
+
+@app.post("/toggle_database")
+def toggle_database(
+    request: ToggleDatabaseRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    doctor_id = current_user["id"]
+    logger.critical(f"toggle_database : enabled = {request.enabled}")
+    response = requests.post(
+        os.getenv("SESSION_SERVICE_URL") + "/toggle_database",
+        json={
+            "doctor_id": doctor_id,
+            "session_id": request.session_id,
+            "enabled": request.enabled
+        }
+    )
+    return response.json()
 
 
 @app.get('/health')

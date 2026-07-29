@@ -1,125 +1,87 @@
-# Session Management Technical Report
+# Medical AI Assistant
+
+## Introduction
+
+This project implements an AI-powered medical assistant designed to help doctors interact with their information system through natural language, it is possible to either talk to the model via a **chat interface** or via a **voice call**
+
+The system combines conversational AI with database interaction capabilities while prioritizing efficiency, low latency, and **local deployment**. Instead of relying on a single large model to handle every task, the architecture uses two extremely lightweight specialized models:
+
+- **qwen2.5:1.5b:** A conversational model responsible for general dialogue and guiding the user.
+- **qwen2.5-coder:3b:** A specialized SQL generation model responsible for translating medical requests into database operations.
+
+Both models are intentionally kept small to minimize hardware requirements. Their combined memory footprint allows them to run simultaneously on any standard computer **locally** without requiring expensive infrastructure or dedicated AI hardware.
+
+This approach demonstrates that efficient AI systems do not always require massive models. By combining specialized models with a carefully designed software architecture, it is possible to achieve fast responses, lower resource consumption, and reliable task execution.
+
+## Why Small Language Models Are Sufficient
+
+A common approach when building AI systems is to use the largest possible model and provide it with all available information. However, for database interaction tasks, this approach introduces several problems: larger context windows increase latency, consume more memory, and can make the model more likely to confuse unrelated information.
+
+This project follows a different approach: instead of increasing the model size, the complexity of the problem is reduced through software architecture.
+
+The database is divided into multiple specialized domains. For example, a medical database containing many tables could be organized as:
+```text
+Medical Database
+|
+├────────── Patients Domain
+│             ├── patient
+│             └── medical_history
+│
+├────────── Appointments Domain
+│             ├── patient
+│             └── rdv
+│
+├────────── Medical Acts Domain
+│             └── acte_medecin
+│
+└────────── Notes Domain
+              └── note_patient
+```
+
+Each domain has its own optimized context containing only the relevant tables, columns, relationships, and rules.
+
+``This reduction of context size provides several advantages:
+``
+- **Higher accuracy:** we don't confuse the model with a huge schema of dozens of tables each containing dozens of columns + a pile of foreign key constraints
+- **Lower latency:** smaller prompts require less processing time
+- **Lower hardware requirements:** small specialized models can run efficiently on standard computers, therefore in local deployment, with the right hardware, you can easily run many many instances and allow multi-threading
+- **Better scalability:** because each model instance requires limited resources, multiple instances can be deployed simultaneously to handle many users.
+
+> A larger model does not automatically guarantee perfect database reasoning. Even very powerful models can make mistakes when presented with a large schema containing many tables, columns, and relationships. So we must isolate irrelevant relationships away 
+
+> note that using smaller models means fewer constraints means more overhead in the determinisitc layer surrounding the model, but it's what makes the model behavior predictable and monitored !
 
 
-The session management module is responsible for maintaining conversational state between a doctor and the medical assistant agent
+## Services
 
-The objective is to provide the language model with the minimum required context while keeping deterministic operations outside the model whenever possible
+The application is composed of several independent services:
 
-The biggest challenge faced was a very tiny model (qwen2.5:3B) that must be multilangual, be conversational and warm, perform correct CRUD operations and correct relative time interpretation where even the biggest models make calculation mistakes
+### Voice Gateway
+- Main API gateway of the application.
+- Handles communication between the user interface, AI models, and database tools.
+- Manages conversations and decides which operations should be executed.
+- Speech-to-text module for converting doctor speech into text.
+- Text-to-speech module for generating voice responses.
 
-**The complete pipeline can be summarized as follows:**
+### Conversational Model
+- Lightweight language model responsible for general interaction.
+- Helps maintain natural conversations and guides users toward available functionalities in the UI
 
-                                        User Message
-                                            |
-                                            v
-                                   +--------------------+
-                                   | Session Manager    |
-                                   +--------------------+
-                                            |
-                                            v
-                                   +--------------------+
-                                   | Intent Router      |
-                                   | (Embedding based)  |
-                                   +--------------------+
-                                            |
-                        +-------------------------+----------------+
-                        |                                          |
-                        v                                          v
-                conversational                                  database
-                        |                                          |
-                        |                                          v
-                        |                                  +----------------+
-                        |                                  | Time Detection |
-                        |                                  | Pipeline       |
-                        |                                  +----------------+
-                        +-------------+                            |
-                                      |                            v
-                                      v                      Time-normalized
-                        Dynamic Context Injection                message
-                                      |
-                                      v
-                                LLM Processing
-                                      |
-                                      v
-                             Response Generation
+### SQL Generation Model
+- Specialized model responsible for converting user requests into PostgreSQL queries.
+- Receives only the relevant database context depending on the selected domain.
 
+### Database Service
+- PostgreSQL database storing medical information : Contains entities such as patients, appointments, medical acts, and notes.
+- redis to save the messages exchanged
 
 ---
-#### Overview of Session:
-
-The central object representing a conversation is:
-
-```python
-class ConversationHistory(BaseModel):
-    doctor_id: int
-    session_id: Optional[int]              
-    content: List[tuple[str, str]]         <--  [history to be injected right after dynamic context]
-    timestamp: Optional[datetime]
-    dynamic_context: str                   <--  [A dynamically chosen context injected depending on the domain of the prompt]
-    detected_language: Optional[str]       <--  [as we accumulate user messages over a time for a given session, at some point we detect language deterministically: meaning no ML involved]
-    intent: Optional[str]                  <--  [either "conversational" or "database", it's the job of the router, if router is uncertain which is rare we call an LLM to classify]
-    last_response: Optional[str]           <--  [LLM response to most recent prompt for easy access]
-```
-Each session is isolated using the pair: `doctor_id + session_id`
-> Note that for now, a simple POST request is needed to the server of the format {"doctor_id" : 1 , "session_id" : 1 , "message" : "prompt"} so in the future we'll use JWT tokens cuz this approach obviously made for debugging not production
-
-**This allows:**
-
-- Each doctor to maintain multiple independent conversations that can use different languages each (even with a model as small as 3B)
-- Independent context injection per session (new dynamic context every new prompt per session because model is tiny and can't handle giant global context cuz it'd exhaust context window size and make it halucinate)
-
-> **note :** for every LLM inference, we talk to the llm_service container to ensure seperation of concerns (it has two endpoints : `/llm_service` and `/ollama`)
-
-
-#### Router's job
-Given the embeddings of two clouds of vectors:
-- **cloud 1** : conversational-like (greet , joke etc)
-- **cloud 2** : statments that query database (like naming database fields or performing CRUD)
-
-Given a user prompt, we calculate its embedding and measure its distance between cloud 1 and cloud 2, then :
-
-$$
-\text{margin} = \left| d(\mathbf{e}_{\text{prompt}}, \mathbf{C}_1) - d(\mathbf{e}_{\text{prompt}}, \mathbf{C}_2) \right|
-$$
-Where:
-𝒆_𝒑𝒓𝒐𝒎𝒑𝒕  = embedding vector of user input
-𝑪₁         = embedding cloud for conversational intent
-𝑪₂         = embedding cloud for database query intent
-𝒅(·, ·)    = distance from a cloud doesnt mean distance to centroid, but rather distance to closest vector (cuz centroids include noise from far vectors lowering margin)
-
-
-if the margin is big enough, we prepare the dynamic contexts related to the task
-
-otherwise if its to small, it shows uncertainty so we call the LLM to classify (we rarely ever get to that due to a good choice of the initial clouds, we made sure they are as distinct as possible to ensure that most vectors must lay near one and far from the other)
-
-#### Dynamic Context
-for each given prompt, we append it to session object of `doctor_id` and `session_id`, then the pipeline for that specific new prompt begins :
-
-- determine the intent of prompt : `conversational | database` via the two clouds idea 
-- if we're still not certain of detected_language despite the history of the session, we give all user inputs in that session using pycld2 until it finally language is finally detected it
-- if intent == `conversational`, we just fetch the conversational prompt of the right detected language (if no language detected yet we always use english), we talk to LLM and get response easily
-- if it's `database`, we firstly watch out for key words like `today|next week|last month|the 3rd of july` etc and we never feed them directly to the LLM because it's always guaranteed to halucinate (even massive models might halucinate), two outcomes :
-    - after a quick deterministic time indicator check (fragile but mostly accurate and will be improved) , if nothing exists we append the user prompt as it is
-    - otherwise we call the LLM forcing it to output a valid json like this :
-    `{'time_string_literal': "aujourd'hui", 'absolute_date': {'day': None, 'month': None}, 'weekday_target': {'weekday': None, 'is_relative_next': False}, 'relative_jump': {'unit': 'day', 'amount': 0}, 'time': {'hour': None, 'minute': None}}` and we deterministically substitute high entropy time indication with soemthing like `YYYY:MM:DD HH:MM:SS` (we mark `XX` for missing fields)
-    
-
-**How to run ?**
-make sure you got ollama
+## Running the Project
+Make sure you have ollama installed with the two models mentioned above as well
 ```bash
 docker compose up --build
-curl -X POST "http://127.1:8001/session" \
-  -H "Content-Type: application/json" \
-  -d '{"doctor_id": 1, "session_id": 1, "message": "hmmm"}'
 ```
-observe that language detected is still unknown, continue talking over same session
+then go to:
 ```bash
-curl -X POST "http://127.1:8001/session" \
-  -H "Content-Type: application/json" \
-  -d '{"doctor_id": 1, "session_id": 1, "message": "les patients que je vais voir aujourd hui"}'
+http://127.1:3000
 ```
-
-
-
-
-

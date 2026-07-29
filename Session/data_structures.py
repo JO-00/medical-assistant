@@ -4,13 +4,15 @@ from datetime import datetime
 
 class ConversationHistory(BaseModel):
     doctor_id: int
-    session_id: Optional[int] = None
-    content: List[tuple[str, str]]
+    session_id: Optional[int] = None  
+    content: List[tuple[str,str]]
     timestamp: Optional[datetime] = None
     dynamic_context: str = ""
     detected_language: Optional[str] = None
     intent: Optional[str] = None
-    last_response: Optional[str] = ""
+    last_response : Optional[str] = ""
+    domain : str = "system"
+    database_mode_enabled : bool = False 
 
     def to_dict(self):
         data = self.model_dump()
